@@ -1,0 +1,173 @@
+pipeline {
+
+    agent any
+
+    environment {
+        COMPOSE_PROJECT_NAME = 'devops-appgestiondesprojets'
+    }
+
+    options {
+        timestamps()
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Check Docker') {
+            steps {
+                sh '''
+                    echo "=== Checking Docker ==="
+                    docker --version
+                    docker compose version
+                '''
+            }
+        }
+
+        stage('Validate Docker Compose') {
+            steps {
+                sh '''
+                    echo "=== Validating Docker Compose ==="
+                    docker compose config
+                '''
+            }
+        }
+
+        stage('Stop Old Containers') {
+            steps {
+                sh '''
+                    echo "=== Stopping old application ==="
+                    docker compose down || true
+                '''
+            }
+        }
+
+        stage('Deploy Application') {
+            steps {
+                sh '''
+                    echo "=== Deploying application ==="
+                    docker compose up -d --no-build
+                '''
+            }
+        }
+
+        stage('Wait for MySQL') {
+            steps {
+                sh '''
+                    echo "=== Waiting for MySQL ==="
+
+                    for i in $(seq 1 30); do
+
+                        STATUS=$(docker inspect \
+                        --format='{{.State.Health.Status}}' \
+                        devops-appgestiondesprojets-mysql-1 2>/dev/null || true)
+
+                        if [ "$STATUS" = "healthy" ]; then
+                            echo "MySQL is healthy!"
+                            exit 0
+                        fi
+
+                        echo "Waiting for MySQL... $i/30"
+                        sleep 3
+                    done
+
+                    echo "MySQL did not become healthy."
+                    exit 1
+                '''
+            }
+        }
+
+        stage('Verify Containers') {
+            steps {
+                sh '''
+                    echo "=== Running containers ==="
+                    docker compose ps
+                '''
+            }
+        }
+
+        stage('Test Backend') {
+            steps {
+                sh '''
+                    echo "=== Testing Backend ==="
+
+                    for i in $(seq 1 30); do
+
+                        if curl -f http://localhost:8081/entreprise/all; then
+                            echo ""
+                            echo "Backend is available!"
+                            exit 0
+                        fi
+
+                        echo "Waiting for Backend... $i/30"
+                        sleep 3
+                    done
+
+                    echo "Backend deployment failed."
+                    exit 1
+                '''
+            }
+        }
+
+        stage('Test Frontend') {
+            steps {
+                sh '''
+                    echo "=== Testing Frontend ==="
+
+                    for i in $(seq 1 20); do
+
+                        if curl -f http://localhost:4200 > /dev/null; then
+                            echo "Frontend is available!"
+                            exit 0
+                        fi
+
+                        echo "Waiting for Frontend... $i/20"
+                        sleep 2
+                    done
+
+                    echo "Frontend deployment failed."
+                    exit 1
+                '''
+            }
+        }
+
+    }
+
+    post {
+
+        success {
+            echo '======================================'
+            echo 'CD DEPLOYMENT SUCCESSFUL!'
+            echo 'Backend  : http://localhost:8081'
+            echo 'Frontend : http://localhost:4200'
+            echo '======================================'
+        }
+
+        failure {
+
+            echo 'CD DEPLOYMENT FAILED!'
+
+            sh '''
+                echo "===== Containers ====="
+                docker compose ps || true
+
+                echo "===== Backend Logs ====="
+                docker compose logs --no-color --tail=100 backend || true
+
+                echo "===== Frontend Logs ====="
+                docker compose logs --no-color --tail=100 frontend || true
+
+                echo "===== MySQL Logs ====="
+                docker compose logs --no-color --tail=100 mysql || true
+            '''
+        }
+
+        always {
+            sh 'docker compose ps || true'
+        }
+    }
+}
