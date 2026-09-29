@@ -1,0 +1,93 @@
+pipeline {
+
+    agent any
+
+    options {
+        timestamps()
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Check Project Structure') {
+            steps {
+                sh '''
+                    echo "=== Checking project files ==="
+
+                    test -f backend/pom.xml
+                    test -f backend/Dockerfile
+
+                    test -f frontend/package.json
+                    test -f frontend/Dockerfile
+
+                    test -f docker-compose.yml
+
+                    echo "Project structure is valid!"
+                '''
+            }
+        }
+
+        stage('Check Docker') {
+            steps {
+                sh 'docker --version'
+                sh 'docker compose version'
+            }
+        }
+
+        stage('Validate Docker Compose') {
+            steps {
+                sh '''
+                    echo "=== Validating docker-compose.yml ==="
+                    docker compose config
+                '''
+            }
+        }
+
+        stage('Build Backend Image') {
+            steps {
+                sh '''
+                    echo "=== Building Backend Docker Image ==="
+                    docker compose build backend
+                '''
+            }
+        }
+
+        stage('Build Frontend Image') {
+            steps {
+                sh '''
+                    echo "=== Building Frontend Docker Image ==="
+                    docker compose build frontend
+                '''
+            }
+        }
+
+        stage('Verify Docker Images') {
+            steps {
+                sh '''
+                    echo "=== Docker Images ==="
+                    docker images | grep devops-appgestiondesprojets || true
+                '''
+            }
+        }
+    }
+
+    post {
+
+        success {
+            echo 'CI validation completed successfully!'
+        }
+
+        failure {
+            echo 'CI validation failed!'
+        }
+
+        always {
+            echo 'CI pipeline finished.'
+        }
+    }
+}
